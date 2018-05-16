@@ -1,12 +1,23 @@
-#include <stddef.h>
+/*
+gcc sendALPAOcmd.c -o sendALPAOcmd -L/home/kvangorkom/milk/lib -I/home/kvangorkom/milk/src/ImageStreamIO -lasdk -limagestreamio
+*/
 
-/* Alpao SDK C Header */
-#include "asdkWrapper.h"
 
 /* System Headers */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stddef.h>
+
+/* Alpao SDK C Header */
+#include "asdkWrapper.h"
+
+/* milk */
+#include "ImageStruct.h"   // cacao data structure definition
+#include "ImageStreamIO.h" // function ImageStreamIO_read_sharedmem_image_toIMAGE()
+//#include "COREMOD_iofits.h"
+
+//#include <fitsio.h>
 
 // Get DM serial number from environment variable
 char* getSerial()
@@ -44,15 +55,25 @@ int sendCommand()
     {
         return -1;
     }
+
+    /* Read fits file */
+    //long test;
+    //test = load_fits("/home/kvangorkom/irisao_measured_flats.fits", "test", 2);
+
+    //fitsfile *fptr;   /* FITS file pointer, defined in fitsio.h */
+    //int status = 0;   /* CFITSIO status value MUST be initialized to zero! */
+    //fits_open_file(&fptr, "/home/kvangorkom/test.fits", READONLY, &status);
+    //fits_read_img(fptr, TFLOAT, fpixel, nbuffer, &nullval,
+    //              buffer, &anynull, &status);
     
     /* Initialize data */
     data = (Scalar*) calloc( nbAct, sizeof( Scalar ) );
-    for ( idx = 0 ; idx < nbAct ; idx++ )
-    {
-        data[idx] = 0.;
-        printf("%f\n", data[idx]);
-    }
-    data[25] = 0.5;
+    //for ( idx = 0 ; idx < nbAct ; idx++ )
+    //{
+    //    data[idx] = 0.;
+    //    printf("%f\n", data[idx]);
+    //}
+    //data[25] = 0.5;
 
     /* Send the command to the DM */
     ret = asdkSend( dm, data );

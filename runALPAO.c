@@ -41,8 +41,13 @@ To do (future):
 
 volatile sig_atomic_t stop;
 
-void inthand(int signum) {
-    stop = 1;
+void handle_signal(int signal)
+{
+    if (signal == SIGINT)
+    {
+        printf("Stopping the ALPAO control loop.\n");
+        stop = 1;
+    }
 }
 
 int controlLoop()
@@ -57,6 +62,7 @@ int controlLoop()
     uint32_t *imsize;  // image size 
     int shared;        // 1 if image in shared memory
     int NBkw;          // number of keywords supported
+    Scalar *   dminputs;
 
     //initialize DM
     asdkDM * dm = NULL;
@@ -90,7 +96,7 @@ int controlLoop()
     int i;
     for (i = 0; i < nbAct; i++)
     {
-      SMimage[0].array.F[i] = 0.;
+      SMimage[0].array.D[i] = 0.;
     }
 
     // post all semaphores
@@ -117,20 +123,32 @@ int controlLoop()
     }
 
     // control loop
-    //n = 100;
-    //for ( idx = 0 ; idx < n ; idx++ )
+    struct sigaction action;
+    action.sa_flags = SA_SIGINFO;
+    action.sa_handler = handle_signal;
+    sigaction(SIGINT, &action, NULL);
     stop = 0;
     while (!stop)
     {
-        printf("I'm looping!\n");
+        printf("Waiting on commands.\n");
         // Wait on semaphore update
         ImageStreamIO_semwait(&SMimage[0], 0);
-
+        
         // Send Command to DM
-        ret = sendCommand(dm, &SMimage[0].array.F); //This doesn't work!
+        if (!stop) // Skip when interrupted
+        {
+            // Cast to type ALPAO expects
+            dminputs = (Scalar*) calloc( nbAct, sizeof( Scalar ) );
+            for ( idx = 0 ; idx < nbAct ; idx++ )
+            {
+                dminputs[idx] = SMimage[0].array.D[idx];
+            }
+            printf("Sending command to ALPAO %s.\n", serial);
+            ret = sendCommand(dm, dminputs); //This doesn't work!
+        }
+    
     }
-    printf("Done!\n");
-
+    printf("Resetting and releasing the DM.\n");
     // Reset and release ALPAO
     asdkReset(dm);
     ret = asdkRelease(dm);
@@ -156,7 +174,7 @@ int sendCommand(asdkDM * dm, Scalar * data)
 /* Main program */
 int main( int argc, char ** argv )
 {
-    signal(SIGINT, inthand);
+    //signal(SIGINT, inthand);
     int ret = controlLoop();
 
     return ret;
