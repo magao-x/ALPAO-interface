@@ -1,19 +1,18 @@
 /*
+
+To compile:
 gcc runALPAO.c -o runALPAO -L/home/kvangorkom/milk/lib -I/home/kvangorkom/milk/src/ImageStreamIO -limagestreamio -lasdk
 
+Usage:
+./runALPAO  <serialnumber> <normalize_bool> <bias_bool>
 
-
-control loop:
--initializes ALPAO
--enters semwait loop
-    - when semaphore is posted, apply SMimage to ALPAO
--clean break out of loop (ctrl c signal? does it stop semwait?) that releases ALPAO
-
+What it does:
+Connects to the ALPAO DM (indicated by its serial number), initializes the
+shared memory image (if it doesn't already exist), and then commands the DM
+from the image when the associated semaphores post.
 
 To do:
 -Input arguments: DM serial number (becomes SMimage name?)
--Figure out data types and shape for DM command
--Figure out how to break out of loop
 -Write a few basic shell scripts with semposts: (set pix, set from fits file, etc)
 -Write python code to do semposts
 
@@ -38,7 +37,7 @@ To do (future):
 /* Alpao SDK C Header */
 #include "asdkWrapper.h"
 
-
+// interrupt signal handling for safe DM shutdown
 volatile sig_atomic_t stop;
 
 void handle_signal(int signal)
@@ -50,6 +49,7 @@ void handle_signal(int signal)
     }
 }
 
+// intialize DM and shared memory and enter DM command loop
 int controlLoop()
 {
     char * serial = "BAX150"; //Make this an input
@@ -74,6 +74,7 @@ int controlLoop()
 
     //------All this should be factored out-----
     // Initialize SMimage if it doesn't already exist
+    // or it does but it's shaped incorrectly.
     IMAGE* SMimage;
     SMimage = (IMAGE*) malloc(sizeof(IMAGE));
 
@@ -135,20 +136,26 @@ int controlLoop()
         ImageStreamIO_semwait(&SMimage[0], 0);
         
         // Send Command to DM
-        if (!stop) // Skip when interrupted
+        if (!stop) // Skip DM on interrupt signal
         {
-            // Cast to type ALPAO expects
+            // Cast to array type ALPAO expects
             dminputs = (Scalar*) calloc( nbAct, sizeof( Scalar ) );
             for ( idx = 0 ; idx < nbAct ; idx++ )
             {
                 dminputs[idx] = SMimage[0].array.D[idx];
             }
             printf("Sending command to ALPAO %s.\n", serial);
-            ret = sendCommand(dm, dminputs); //This doesn't work!
+            ret = sendCommand(dm, dminputs);
         }
     
     }
-    printf("Resetting and releasing the DM.\n");
+
+
+    // This should maybe delete the shmim too.
+    // Otherwise, you can get a backlog next time you start the loop.
+
+    // Safe DM shutdown on interrupt
+    printf("Resetting and releasing the ALPAO %s.\n", serial);
     // Reset and release ALPAO
     asdkReset(dm);
     ret = asdkRelease(dm);
