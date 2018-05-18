@@ -1,7 +1,6 @@
 /*
-
 To compile:
->>>gcc runALPAO.c -o build/runALPAO -L/home/kvangorkom/milk/lib -I/home/kvangorkom/milk/src/ImageStreamIO -limagestreamio -lasdk
+>>>gcc runALPAO.c -o build/runALPAO -L$HOME/milk/lib -I$HOME/milk/src/ImageStreamIO -limagestreamio -lasdk
 (You must already have the ALPAO SDK and milk installed.)
 
 Usage:
@@ -23,12 +22,9 @@ Still to be implemented or determined:
 -Mapping from normalized ASDK inputs (-1 -> 1) to displacement
 -Multiplexed virtual DM
 
-
 To do:
+-generalize releaseALPAO and resetALPAO to handle serial input
 -Write a few basic shell scripts with semposts: (set pix, set from fits file, etc)
--Set ALPAO to 0 / reset shared memory when script is started
--Reset shared memory when exiting? Maybe don't do that, since other things will be looking at it,
-and you'd rather not break them when turning the DM on/off.
 */
 
 /* System Headers */
@@ -53,7 +49,7 @@ void handle_signal(int signal)
 {
     if (signal == SIGINT)
     {
-        printf("Stopping the ALPAO control loop.\n");
+        printf("\nExiting the ALPAO control loop.\n");
         stop = 1;
     }
 }
@@ -85,7 +81,7 @@ void initializeSharedMemory(char * serial, UInt nbAct)
     // create an image in shared memory
     ImageStreamIO_createIm(&SMimage[0], serial, naxis, imsize, atype, shared, NBkw);
 
-    /* flush semaphores to avoid commanding the DM from a 
+    /* flush all semaphores to avoid commanding the DM from a 
     backlog in shared memory */
     ImageStreamIO_semflush(&SMimage[0], -1);
 
@@ -147,19 +143,21 @@ int controlLoop(char * serial, int nobias, int nonorm)
         return -1;
     }
 
-    // set DM to all 0 state just set by initializing shared memory
-    printf("Setting DM to 0s.\n");
+    // set DM to all-0 state to begin
+    printf("ALPAO %s: initializing all actuators to 0 displacement.\n", serial);
     ImageStreamIO_semwait(&SMimage[0], 0);
 
-    // control loop
+    // SIGINT handling
     struct sigaction action;
     action.sa_flags = SA_SIGINFO;
     action.sa_handler = handle_signal;
     sigaction(SIGINT, &action, NULL);
     stop = 0;
+
+    // control loop
     while (!stop)
     {
-        printf("Waiting on commands.\n");
+        printf("ALPAO %s: waiting on commands.\n", serial);
         // Wait on semaphore update
         ImageStreamIO_semwait(&SMimage[0], 0);
         
@@ -172,7 +170,7 @@ int controlLoop(char * serial, int nobias, int nonorm)
             {
                 dminputs[idx] = SMimage[0].array.D[idx];
             }
-            printf("Sending command to ALPAO %s with nobias=%d and nonorm=%d.\n", serial, nobias, nonorm);
+            printf("ALPAO %s: sending command with nobias=%d and nonorm=%d.\n", serial, nobias, nonorm);
             ret = sendCommand(dm, dminputs);
             if (ret == -1)
             {
@@ -181,11 +179,8 @@ int controlLoop(char * serial, int nobias, int nonorm)
         }
     }
 
-    // This should maybe delete the shmim too.
-    // Otherwise, you can get a backlog next time you start the loop.
-
     // Safe DM shutdown on interrupt
-    printf("Resetting and releasing the ALPAO %s.\n", serial);
+    printf("ALPAO %s: resetting and releasing DM.\n", serial);
     // Reset and release ALPAO
     asdkReset(dm);
     ret = asdkRelease(dm);
@@ -293,7 +288,6 @@ static struct argp argp = { options, parse_opt, args_doc, doc };
 /* Main program */
 int main( int argc, char ** argv )
 {
-
     struct arguments arguments;
 
     /* Default values. */
@@ -304,7 +298,7 @@ int main( int argc, char ** argv )
      be reflected in arguments. */
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
 
-    //signal(SIGINT, inthand);
+    // enter the control loop
     int ret = controlLoop(arguments.args[0], arguments.nobias, arguments.nonorm);
     asdkPrintLastError();
 
