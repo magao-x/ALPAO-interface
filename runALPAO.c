@@ -1,7 +1,8 @@
 /*
 
 To compile:
-gcc runALPAO.c -o build/runALPAO -L/home/kvangorkom/milk/lib -I/home/kvangorkom/milk/src/ImageStreamIO -limagestreamio -lasdk
+>>>gcc runALPAO.c -o build/runALPAO -L/home/kvangorkom/milk/lib -I/home/kvangorkom/milk/src/ImageStreamIO -limagestreamio -lasdk
+(You must already have the ALPAO SDK and milk installed.)
 
 Usage:
 To run with defaults
@@ -25,8 +26,10 @@ Still to be implemented or determined:
 
 To do:
 -Write a few basic shell scripts with semposts: (set pix, set from fits file, etc)
+-Set ALPAO to 0 / reset shared memory when script is started
+-Reset shared memory when exiting? Maybe don't do that, since other things will be looking at it,
+and you'd rather not break them when turning the DM on/off.
 */
-
 
 /* System Headers */
 #include <stdio.h>
@@ -55,41 +58,16 @@ void handle_signal(int signal)
     }
 }
 
-// intialize DM and shared memory and enter DM command loop
-int controlLoop(char * serial, int nobias, int nonorm)
+// Initialize the shared memory image
+void initializeSharedMemory(char * serial, UInt nbAct)
 {
-    //char * serial = "BAX150"; //Make this an input
-    int n, idx;
-    UInt nbAct;
-    COMPL_STAT ret;
-    Scalar     tmp;
     long naxis; // number of axis
     uint8_t atype;     // data type
     uint32_t *imsize;  // image size 
     int shared;        // 1 if image in shared memory
     int NBkw;          // number of keywords supported
-    Scalar *   dminputs;
-
-    //initialize DM
-    asdkDM * dm = NULL;
-    dm = asdkInit(serial);
-    if (dm == NULL)
-    {
-        return -1;
-    }
-
-    // Get number of actuators
-    ret = asdkGet( dm, "NbOfActuator", &tmp );
-    if (ret == -1)
-    {
-        return -1;
-    }
-    nbAct = (UInt) tmp;
-
-    //------All this should be factored out-----
-    // Initialize SMimage if it doesn't already exist
-    // or it does but it's shaped incorrectly.
     IMAGE* SMimage;
+
     SMimage = (IMAGE*) malloc(sizeof(IMAGE));
 
     naxis = 2;
@@ -107,7 +85,11 @@ int controlLoop(char * serial, int nobias, int nonorm)
     // create an image in shared memory
     ImageStreamIO_createIm(&SMimage[0], serial, naxis, imsize, atype, shared, NBkw);
 
-    /*
+    /* flush semaphores to avoid commanding the DM from a 
+    backlog in shared memory */
+    ImageStreamIO_semflush(&SMimage[0], -1);
+
+    // write 0s to the image
     int i;
     for (i = 0; i < nbAct; i++)
     {
@@ -120,14 +102,42 @@ int controlLoop(char * serial, int nobias, int nonorm)
     SMimage[0].md[0].write = 0; // Done writing data
     SMimage[0].md[0].cnt0++;
     SMimage[0].md[0].cnt1++;
-    */
-    //--------------------------------
+}
 
-    //initialize read
+// intialize DM and shared memory and enter DM command loop
+int controlLoop(char * serial, int nobias, int nonorm)
+{
+    int n, idx;
+    UInt nbAct;
+    COMPL_STAT ret;
+    Scalar     tmp;
+    Scalar *   dminputs;
+    IMAGE* SMimage;
+
+    //initialize DM
+    asdkDM * dm = NULL;
+    dm = asdkInit(serial);
+    if (dm == NULL)
+    {
+        return -1;
+    }
+
+    // Get number of actuators
+    ret = asdkGet( dm, "NbOfActuator", &tmp );
+    if (ret == -1)
+    {
+        return -1;
+    }
+    nbAct = (UInt) tmp;
+
+    // initialize shared memory image to 0s
+    initializeSharedMemory(serial, nbAct);
+
+    // connect to shared memory image (SMimage)
+    SMimage = (IMAGE*) malloc(sizeof(IMAGE));
     ImageStreamIO_read_sharedmem_image_toIMAGE(serial, &SMimage[0]);
 
-
-    // Check SMimage dimensionality and size against DM
+    // Validate SMimage dimensionality and size against DM
     if (SMimage[0].md[0].naxis != 2) {
         printf("SM image naxis = %d\n", SMimage[0].md[0].naxis);
         return -1;
@@ -136,6 +146,10 @@ int controlLoop(char * serial, int nobias, int nonorm)
         printf("SM image size (axis 1) = %d", SMimage[0].md[0].size[0]);
         return -1;
     }
+
+    // set DM to all 0 state just set by initializing shared memory
+    printf("Setting DM to 0s.\n");
+    ImageStreamIO_semwait(&SMimage[0], 0);
 
     // control loop
     struct sigaction action;
@@ -237,8 +251,7 @@ struct arguments
 };
 
 /* Parse a single option. */
-static error_t
-parse_opt (int key, char *arg, struct argp_state *state)
+static error_t parse_opt (int key, char *arg, struct argp_state *state)
 {
   /* Get the input argument from argp_parse, which we
      know is a pointer to our arguments structure. */
