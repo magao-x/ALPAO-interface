@@ -23,7 +23,6 @@ Still to be implemented or determined:
 -Multiplexed virtual DM
 
 To do:
--generalize releaseALPAO and resetALPAO to handle serial input
 -Write a few basic shell scripts with semposts: (set pix, set from fits file, etc)
 */
 
