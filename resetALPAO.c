@@ -1,44 +1,53 @@
-#include <stddef.h>
+/*
+Compile:
+gcc resetALPAO.c -o build/resetALPAO -lasdk
 
-/* Alpao SDK C Header */
-#include "asdkWrapper.h"
+Call:
+./resetALPAO <serialnumber>
+*/
 
 /* System Headers */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stddef.h>
 
-// Get DM serial number from environment variable
-char* getSerial()
-{
-    return "BAX150"; // Hard-coded for now
-}
+/* Alpao SDK C Header */
+#include "asdkWrapper.h"
 
 /* Reset mirror values */
-int resetMirror()
+int resetMirror(char * serial)
 {
     COMPL_STAT ret;
     asdkDM * dm = NULL;
-    char* serial = "";
-    
-    /* Get serial number */
-    serial = getSerial();
 
     /* Load configuration file */
-    dm = asdkInit( serial );
-    if ( dm == NULL )
+    dm = asdkInit(serial);
+    if (dm == NULL)
     {
         return -1;
     }
-    ret = asdkReset( dm );
 
-    return 0;
+    /* reset */
+    ret = asdkReset( dm );
+    dm = NULL;
+
+    return ret;
 }
 
 /* Main program */
 int main( int argc, char ** argv )
 {
-    int ret = resetMirror();
+    char * serial;
+
+    if (argc < 2)
+    {
+        printf("Serial number must be supplied.\n");
+        return -1;
+    }
+    serial = argv[1];
+
+    int ret = resetMirror(serial);
     
     /* Print last error if any */
     asdkPrintLastError();

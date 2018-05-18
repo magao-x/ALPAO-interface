@@ -1,27 +1,27 @@
 /*
-
 To compile:
-gcc runALPAO.c -o runALPAO -L/home/kvangorkom/milk/lib -I/home/kvangorkom/milk/src/ImageStreamIO -limagestreamio -lasdk
+>>>gcc runALPAO.c -o build/runALPAO -L$HOME/milk/lib -I$HOME/milk/src/ImageStreamIO -limagestreamio -lasdk
+(You must already have the ALPAO SDK and milk installed.)
 
 Usage:
-./runALPAO  <serialnumber> <normalize_bool> <bias_bool>
+To run with defaults
+>>>./runALPAO <serialnumber>
+To run with bias and normalization conventions disabled (not yet implemented):
+>>>./runALPAO <serialnumber> --nobias --nonorm
+
+For help:
+>>>./runALPAO --help
 
 What it does:
 Connects to the ALPAO DM (indicated by its serial number), initializes the
 shared memory image (if it doesn't already exist), and then commands the DM
 from the image when the associated semaphores post.
 
-To do:
--Input arguments: DM serial number (becomes SMimage name?)
--Write a few basic shell scripts with semposts: (set pix, set from fits file, etc)
--Write python code to do semposts
-
-To do (future):
--Calibration (bias, displacement normalization)
+Still to be implemented or determined:
+-Bias and displacement (though placeholder functions exist)
+-Mapping from normalized ASDK inputs (-1 -> +1) to physical displacement
 -Multiplexed virtual DM
-
 */
-
 
 /* System Headers */
 #include <stdio.h>
@@ -29,6 +29,7 @@ To do (future):
 #include <unistd.h>
 #include <stddef.h>
 #include <signal.h>
+#include <argp.h>
 
 /* milk */
 #include "ImageStruct.h"   // cacao data structure definition
@@ -44,38 +45,21 @@ void handle_signal(int signal)
 {
     if (signal == SIGINT)
     {
-        printf("Stopping the ALPAO control loop.\n");
+        printf("\nExiting the ALPAO control loop.\n");
         stop = 1;
     }
 }
 
-// intialize DM and shared memory and enter DM command loop
-int controlLoop()
+// Initialize the shared memory image
+void initializeSharedMemory(char * serial, UInt nbAct)
 {
-    char * serial = "BAX150"; //Make this an input
-    int n, idx;
-    UInt nbAct;
-    COMPL_STAT ret;
-    Scalar     tmp;
     long naxis; // number of axis
     uint8_t atype;     // data type
     uint32_t *imsize;  // image size 
     int shared;        // 1 if image in shared memory
     int NBkw;          // number of keywords supported
-    Scalar *   dminputs;
-
-    //initialize DM
-    asdkDM * dm = NULL;
-    dm = asdkInit(serial);
-
-    // Get number of actuators
-    ret = asdkGet( dm, "NbOfActuator", &tmp );
-    nbAct = (UInt) tmp;
-
-    //------All this should be factored out-----
-    // Initialize SMimage if it doesn't already exist
-    // or it does but it's shaped incorrectly.
     IMAGE* SMimage;
+
     SMimage = (IMAGE*) malloc(sizeof(IMAGE));
 
     naxis = 2;
@@ -93,7 +77,11 @@ int controlLoop()
     // create an image in shared memory
     ImageStreamIO_createIm(&SMimage[0], serial, naxis, imsize, atype, shared, NBkw);
 
-    /*
+    /* flush all semaphores to avoid commanding the DM from a 
+    backlog in shared memory */
+    ImageStreamIO_semflush(&SMimage[0], -1);
+
+    // write 0s to the image
     int i;
     for (i = 0; i < nbAct; i++)
     {
@@ -106,14 +94,42 @@ int controlLoop()
     SMimage[0].md[0].write = 0; // Done writing data
     SMimage[0].md[0].cnt0++;
     SMimage[0].md[0].cnt1++;
-    */
-    //--------------------------------
+}
 
-    //initialize read
+// intialize DM and shared memory and enter DM command loop
+int controlLoop(char * serial, int nobias, int nonorm)
+{
+    int n, idx;
+    UInt nbAct;
+    COMPL_STAT ret;
+    Scalar     tmp;
+    Scalar *   dminputs;
+    IMAGE* SMimage;
+
+    //initialize DM
+    asdkDM * dm = NULL;
+    dm = asdkInit(serial);
+    if (dm == NULL)
+    {
+        return -1;
+    }
+
+    // Get number of actuators
+    ret = asdkGet( dm, "NbOfActuator", &tmp );
+    if (ret == -1)
+    {
+        return -1;
+    }
+    nbAct = (UInt) tmp;
+
+    // initialize shared memory image to 0s
+    initializeSharedMemory(serial, nbAct);
+
+    // connect to shared memory image (SMimage)
+    SMimage = (IMAGE*) malloc(sizeof(IMAGE));
     ImageStreamIO_read_sharedmem_image_toIMAGE(serial, &SMimage[0]);
 
-
-    // Check SMimage dimensionality and size against DM
+    // Validate SMimage dimensionality and size against DM
     if (SMimage[0].md[0].naxis != 2) {
         printf("SM image naxis = %d\n", SMimage[0].md[0].naxis);
         return -1;
@@ -123,15 +139,21 @@ int controlLoop()
         return -1;
     }
 
-    // control loop
+    // set DM to all-0 state to begin
+    printf("ALPAO %s: initializing all actuators to 0 displacement.\n", serial);
+    ImageStreamIO_semwait(&SMimage[0], 0);
+
+    // SIGINT handling
     struct sigaction action;
     action.sa_flags = SA_SIGINFO;
     action.sa_handler = handle_signal;
     sigaction(SIGINT, &action, NULL);
     stop = 0;
+
+    // control loop
     while (!stop)
     {
-        printf("Waiting on commands.\n");
+        printf("ALPAO %s: waiting on commands.\n", serial);
         // Wait on semaphore update
         ImageStreamIO_semwait(&SMimage[0], 0);
         
@@ -144,18 +166,17 @@ int controlLoop()
             {
                 dminputs[idx] = SMimage[0].array.D[idx];
             }
-            printf("Sending command to ALPAO %s.\n", serial);
+            printf("ALPAO %s: sending command with nobias=%d and nonorm=%d.\n", serial, nobias, nonorm);
             ret = sendCommand(dm, dminputs);
+            if (ret == -1)
+            {
+                return -1;
+            }
         }
-    
     }
 
-
-    // This should maybe delete the shmim too.
-    // Otherwise, you can get a backlog next time you start the loop.
-
     // Safe DM shutdown on interrupt
-    printf("Resetting and releasing the ALPAO %s.\n", serial);
+    printf("ALPAO %s: resetting and releasing DM.\n", serial);
     // Reset and release ALPAO
     asdkReset(dm);
     ret = asdkRelease(dm);
@@ -175,14 +196,107 @@ int sendCommand(asdkDM * dm, Scalar * data)
     /* Release memory */
     free( data );
 
-    return 0;
+    return ret;
 }
+
+/* Placeholder for DC bias */
+void bias_inputs(Scalar * dm_inputs)
+{
+    // do something
+}
+
+/* Placeholder for normalization 
+
+This will require knowledge of the ALPAO
+influence functions. Should this reference
+an external calibration file?*/
+void normalize_inputs(Scalar * dm_inputs)
+{
+    // do something
+}
+
+
+/*
+Argument parsing
+*/
+
+/* Program documentation. */
+static char doc[] =
+  "runALPAO-- enter the ALPAO DM command loop and wait for milk shared memory images to be posted at <serial>";
+
+/* A description of the arguments we accept. */
+static char args_doc[] = "serial";
+
+/* The options we understand. */
+static struct argp_option options[] = {
+  {"nobias",  'b', 0,      0,  "Disable automatically biasing the DM (enabled by default)" },
+  {"nonorm",    'n', 0,      0,  "Disable displacement normalization (enabled by default)" },
+  { 0 }
+};
+
+/* Used by main to communicate with parse_opt. */
+struct arguments
+{
+  char *args[1];                /* serial */
+  int nobias, nonorm;
+};
+
+/* Parse a single option. */
+static error_t parse_opt (int key, char *arg, struct argp_state *state)
+{
+  /* Get the input argument from argp_parse, which we
+     know is a pointer to our arguments structure. */
+  struct arguments *arguments = state->input;
+
+  switch (key)
+    {
+    case 'b':
+      arguments->nobias = 1;
+      break;
+    case 'n':
+      arguments->nonorm = 1;
+      break;
+
+    case ARGP_KEY_ARG:
+      if (state->arg_num >= 1)
+        /* Too many arguments. */
+        argp_usage (state);
+
+      arguments->args[state->arg_num] = arg;
+
+      break;
+
+    case ARGP_KEY_END:
+      if (state->arg_num < 1)
+        /* Not enough arguments. */
+        argp_usage (state);
+      break;
+
+    default:
+      return ARGP_ERR_UNKNOWN;
+    }
+  return 0;
+}
+
+/* Our argp parser. */
+static struct argp argp = { options, parse_opt, args_doc, doc };
 
 /* Main program */
 int main( int argc, char ** argv )
 {
-    //signal(SIGINT, inthand);
-    int ret = controlLoop();
+    struct arguments arguments;
+
+    /* Default values. */
+    arguments.nobias = 0;
+    arguments.nonorm = 0;
+
+    /* Parse our arguments; every option seen by parse_opt will
+     be reflected in arguments. */
+    argp_parse (&argp, argc, argv, 0, 0, &arguments);
+
+    // enter the control loop
+    int ret = controlLoop(arguments.args[0], arguments.nobias, arguments.nonorm);
+    asdkPrintLastError();
 
     return ret;
 }
