@@ -1,7 +1,7 @@
 /*
 
 To compile:
-gcc runALPAO.c -o runALPAO -L/home/kvangorkom/milk/lib -I/home/kvangorkom/milk/src/ImageStreamIO -limagestreamio -lasdk
+gcc runALPAO.c -o build/runALPAO -L/home/kvangorkom/milk/lib -I/home/kvangorkom/milk/src/ImageStreamIO -limagestreamio -lasdk
 
 Usage:
 ./runALPAO  <serialnumber> <normalize_bool> <bias_bool>
@@ -50,9 +50,9 @@ void handle_signal(int signal)
 }
 
 // intialize DM and shared memory and enter DM command loop
-int controlLoop()
+int controlLoop(char * serial)
 {
-    char * serial = "BAX150"; //Make this an input
+    //char * serial = "BAX150"; //Make this an input
     int n, idx;
     UInt nbAct;
     COMPL_STAT ret;
@@ -67,9 +67,17 @@ int controlLoop()
     //initialize DM
     asdkDM * dm = NULL;
     dm = asdkInit(serial);
+    if (dm == NULL)
+    {
+        return -1;
+    }
 
     // Get number of actuators
     ret = asdkGet( dm, "NbOfActuator", &tmp );
+    if (ret == -1)
+    {
+        return -1;
+    }
     nbAct = (UInt) tmp;
 
     //------All this should be factored out-----
@@ -146,10 +154,12 @@ int controlLoop()
             }
             printf("Sending command to ALPAO %s.\n", serial);
             ret = sendCommand(dm, dminputs);
+            if (ret == -1)
+            {
+                return -1;
+            }
         }
-    
     }
-
 
     // This should maybe delete the shmim too.
     // Otherwise, you can get a backlog next time you start the loop.
@@ -175,14 +185,23 @@ int sendCommand(asdkDM * dm, Scalar * data)
     /* Release memory */
     free( data );
 
-    return 0;
+    return ret;
 }
 
 /* Main program */
 int main( int argc, char ** argv )
 {
+    char * serial;
+
+    if (argc < 2)
+    {
+        printf("You must provide the ALPAO DM serial number!");
+    }
+    serial = argv[1];
+
     //signal(SIGINT, inthand);
-    int ret = controlLoop();
+    int ret = controlLoop(serial);
+    asdkPrintLastError();
 
     return ret;
 }
