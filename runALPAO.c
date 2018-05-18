@@ -21,9 +21,6 @@ Still to be implemented or determined:
 -Bias and displacement (though placeholder functions exist)
 -Mapping from normalized ASDK inputs (-1 -> +1) to physical displacement
 -Multiplexed virtual DM
-
-To do:
--Write a few basic shell scripts with semposts: (set pix, set from fits file, etc)
 */
 
 /* System Headers */
