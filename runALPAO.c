@@ -4,22 +4,27 @@ To compile:
 gcc runALPAO.c -o build/runALPAO -L/home/kvangorkom/milk/lib -I/home/kvangorkom/milk/src/ImageStreamIO -limagestreamio -lasdk
 
 Usage:
-./runALPAO  <serialnumber> <normalize_bool> <bias_bool>
+To run with defaults
+>>>./runALPAO <serialnumber>
+To run with bias and normalization conventions disabled (not yet implemented):
+>>>./runALPAO <serialnumber> --nobias --nonorm
+
+For help:
+>>>./runALPAO --help
 
 What it does:
 Connects to the ALPAO DM (indicated by its serial number), initializes the
 shared memory image (if it doesn't already exist), and then commands the DM
 from the image when the associated semaphores post.
 
-To do:
--Input arguments: DM serial number (becomes SMimage name?)
--Write a few basic shell scripts with semposts: (set pix, set from fits file, etc)
--Write python code to do semposts
-
-To do (future):
--Calibration (bias, displacement normalization)
+Still to be implemented or determined:
+-Bias and displacement (though placeholder functions exist)
+-Mapping from normalized ASDK inputs (-1 -> 1) to displacement
 -Multiplexed virtual DM
 
+
+To do:
+-Write a few basic shell scripts with semposts: (set pix, set from fits file, etc)
 */
 
 
@@ -29,6 +34,7 @@ To do (future):
 #include <unistd.h>
 #include <stddef.h>
 #include <signal.h>
+#include <argp.h>
 
 /* milk */
 #include "ImageStruct.h"   // cacao data structure definition
@@ -50,7 +56,7 @@ void handle_signal(int signal)
 }
 
 // intialize DM and shared memory and enter DM command loop
-int controlLoop(char * serial)
+int controlLoop(char * serial, int nobias, int nonorm)
 {
     //char * serial = "BAX150"; //Make this an input
     int n, idx;
@@ -152,7 +158,7 @@ int controlLoop(char * serial)
             {
                 dminputs[idx] = SMimage[0].array.D[idx];
             }
-            printf("Sending command to ALPAO %s.\n", serial);
+            printf("Sending command to ALPAO %s with nobias=%d and nonorm=%d.\n", serial, nobias, nonorm);
             ret = sendCommand(dm, dminputs);
             if (ret == -1)
             {
@@ -188,19 +194,105 @@ int sendCommand(asdkDM * dm, Scalar * data)
     return ret;
 }
 
+/* Placeholder for DC bias */
+void bias_inputs(Scalar * dm_inputs)
+{
+    // do something
+}
+
+/* Placeholder for normalization 
+
+This will require knowledge of the ALPAO
+influence functions. Should this reference
+an external calibration file?*/
+void normalize_inputs(Scalar * dm_inputs)
+{
+    // do something
+}
+
+
+/*
+Argument parsing
+*/
+
+/* Program documentation. */
+static char doc[] =
+  "runALPAO-- enter the ALPAO DM command loop and wait for milk shared memory images to be posted at <serial>";
+
+/* A description of the arguments we accept. */
+static char args_doc[] = "serial";
+
+/* The options we understand. */
+static struct argp_option options[] = {
+  {"nobias",  'b', 0,      0,  "Disable automatically biasing the DM (enabled by default)" },
+  {"nonorm",    'n', 0,      0,  "Disable displacement normalization (enabled by default)" },
+  { 0 }
+};
+
+/* Used by main to communicate with parse_opt. */
+struct arguments
+{
+  char *args[1];                /* serial */
+  int nobias, nonorm;
+};
+
+/* Parse a single option. */
+static error_t
+parse_opt (int key, char *arg, struct argp_state *state)
+{
+  /* Get the input argument from argp_parse, which we
+     know is a pointer to our arguments structure. */
+  struct arguments *arguments = state->input;
+
+  switch (key)
+    {
+    case 'b':
+      arguments->nobias = 1;
+      break;
+    case 'n':
+      arguments->nonorm = 1;
+      break;
+
+    case ARGP_KEY_ARG:
+      if (state->arg_num >= 1)
+        /* Too many arguments. */
+        argp_usage (state);
+
+      arguments->args[state->arg_num] = arg;
+
+      break;
+
+    case ARGP_KEY_END:
+      if (state->arg_num < 1)
+        /* Not enough arguments. */
+        argp_usage (state);
+      break;
+
+    default:
+      return ARGP_ERR_UNKNOWN;
+    }
+  return 0;
+}
+
+/* Our argp parser. */
+static struct argp argp = { options, parse_opt, args_doc, doc };
+
 /* Main program */
 int main( int argc, char ** argv )
 {
-    char * serial;
 
-    if (argc < 2)
-    {
-        printf("You must provide the ALPAO DM serial number!");
-    }
-    serial = argv[1];
+    struct arguments arguments;
+
+    /* Default values. */
+    arguments.nobias = 0;
+    arguments.nonorm = 0;
+
+    /* Parse our arguments; every option seen by parse_opt will
+     be reflected in arguments. */
+    argp_parse (&argp, argc, argv, 0, 0, &arguments);
 
     //signal(SIGINT, inthand);
-    int ret = controlLoop(serial);
+    int ret = controlLoop(arguments.args[0], arguments.nobias, arguments.nonorm);
     asdkPrintLastError();
 
     return ret;
