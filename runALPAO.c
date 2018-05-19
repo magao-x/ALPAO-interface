@@ -80,8 +80,9 @@ void initializeSharedMemory(char * serial, UInt nbAct)
     /* flush all semaphores to avoid commanding the DM from a 
     backlog in shared memory */
     ImageStreamIO_semflush(&SMimage[0], -1);
-
+    
     // write 0s to the image
+    imarray[0].md[0].write = 1; // set this flag to 1 when writing data
     int i;
     for (i = 0; i < nbAct; i++)
     {
