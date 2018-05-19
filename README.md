@@ -22,4 +22,4 @@ Once the control loop is running, the DM can be commanded by writing a 97x1 imag
 	./loadfits <path-to-fits-file> <serial>
 	./setpix <value> <actuator-number> <serial>
 	
-Alternatively, [PyImageStreamIO](https://github.com/kvangorkom/pyImageStreamIO) provides a simple interface in Python.
+Alternatively, [PyImageStreamIO](https://github.com/milk-org/pyImageStreamIO) provides a simple interface in Python.
