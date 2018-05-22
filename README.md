@@ -1,15 +1,20 @@
 # ALPAO-interface
-Interface to ALPAO DM-97
 
 To compile with the ASDK and milk [ImageStreamIO](https://github.com/milk-org/ImageStreamIO) libraries:
 	
 	gcc runALPAO.c -o build/runALPAO -L$HOME/milk/lib -I$HOME/milk/src/ImageStreamIO -limagestreamio -lasdk
+	
+Before running, set the path to the ALPAO configuration files and copy <serial>_userconfig.txt to the same direcotry:
+	
+	export ACECFG=$HOME/ALPAO/Config
+
+------------------------
 
 To enter the DM control loop with default settings:
 
 	./runALPAO <serialnumber>
 
-`ctrl+c` will exit the loop and safely reset and release the DM. To run with bias and normalization conventions disabled (not yet implemented):
+`ctrl+c` will exit the loop and safely reset and release the DM. To run with bias and normalization conventions disabled:
 
 	./runALPAO <serialnumber> --nobias --nonorm
 
