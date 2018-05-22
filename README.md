@@ -4,7 +4,7 @@ To compile with the ASDK and milk [ImageStreamIO](https://github.com/milk-org/Im
 	
 	gcc runALPAO.c -o build/runALPAO -L$HOME/milk/lib -I$HOME/milk/src/ImageStreamIO -limagestreamio -lasdk
 	
-Before running, set the path to the ALPAO configuration files and copy \<serial\>_userconfig.txt to the same direcotry:
+Before running, set the path to the ALPAO configuration files and copy \<serial\>_userconfig.txt to the same directory:
 	
 	export ACECFG=$HOME/ALPAO/Config
 
