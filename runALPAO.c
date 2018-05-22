@@ -103,7 +103,6 @@ int controlLoop(char * serial, int nobias, int nonorm)
     UInt nbAct;
     COMPL_STAT ret;
     Scalar     tmp;
-    Scalar *   dminputs;
     IMAGE* SMimage;
 
     //initialize DM
@@ -142,6 +141,11 @@ int controlLoop(char * serial, int nobias, int nonorm)
     // set DM to all-0 state to begin
     printf("ALPAO %s: initializing all actuators to 0 displacement.\n", serial);
     ImageStreamIO_semwait(&SMimage[0], 0);
+    ret = sendCommand(dm, SMimage, nbAct);
+    if (ret == -1)
+    {
+        return -1;
+    }
 
     // SIGINT handling
     struct sigaction action;
@@ -160,14 +164,9 @@ int controlLoop(char * serial, int nobias, int nonorm)
         // Send Command to DM
         if (!stop) // Skip DM on interrupt signal
         {
-            // Cast to array type ALPAO expects
-            dminputs = (Scalar*) calloc( nbAct, sizeof( Scalar ) );
-            for ( idx = 0 ; idx < nbAct ; idx++ )
-            {
-                dminputs[idx] = SMimage[0].array.D[idx];
-            }
+
             printf("ALPAO %s: sending command with nobias=%d and nonorm=%d.\n", serial, nobias, nonorm);
-            ret = sendCommand(dm, dminputs);
+            ret = sendCommand(dm, SMimage, nbAct);
             if (ret == -1)
             {
                 return -1;
@@ -185,16 +184,25 @@ int controlLoop(char * serial, int nobias, int nonorm)
     return 0;
 }
 
-/* Send command to mirror */
-int sendCommand(asdkDM * dm, Scalar * data)
+/* Send command to mirror from shared memory */
+int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct)
 {
     COMPL_STAT ret;
+    int idx;
+    Scalar *   dminputs;
+
+    // Cast to array type ALPAO expects
+    dminputs = (Scalar*) calloc( nbAct, sizeof( Scalar ) );
+    for ( idx = 0 ; idx < nbAct ; idx++ )
+    {
+        dminputs[idx] = SMimage[0].array.D[idx];
+    }
 
     /* Send the command to the DM */
-    ret = asdkSend(dm, data);
+    ret = asdkSend(dm, dminputs);
 
     /* Release memory */
-    free( data );
+    free( dminputs );
 
     return ret;
 }
