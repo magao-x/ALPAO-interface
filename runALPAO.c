@@ -183,6 +183,25 @@ int controlLoop(char * serial, int nobias, int nonorm)
     return 0;
 }
 
+/* Placeholder for normalization 
+
+This will require knowledge of the ALPAO
+influence functions. Should this reference
+an external calibration file?*/
+void normalize_inputs(Scalar * dminputs, int nbAct)
+{
+    int idx;
+    Scalar volume_factor;
+    // hard-coded for the moment
+    volume_factor = 0.143; 
+
+    // normalize each actuator stroke
+    for ( idx = 0 ; idx < nbAct ; idx++)
+    {
+        dminputs[idx] *= volume_factor;
+    }
+}
+
 /* Remove DC bias in inputs to maximize actuator range */
 void bias_inputs(Scalar * dminputs, int nbAct)
 {
@@ -218,11 +237,21 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm)
         dminputs[idx] = SMimage[0].array.D[idx];
     }
 
+    /*normalize inputs such that volume displaced by the requested command roughly
+    matches the equivalent volume that would be displaced by a cuboid of dimensions
+    actuator-pitch x actuator-pitch x normalized-stroke. This is a constant factor 
+    that's found by calculating the volume under the DM influence function. */
+    //
+    if (nonorm != 1)
+    {
+        normalize_inputs(dminputs, nbAct);
+    }
+
+    // remove DC bias in inputs
     if (nobias != 1)
     {
         bias_inputs(dminputs, nbAct);
     }
-    
 
     for ( idx = 0 ; idx < nbAct ; idx++ )
     {
@@ -237,17 +266,6 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm)
 
     return ret;
 }
-
-/* Placeholder for normalization 
-
-This will require knowledge of the ALPAO
-influence functions. Should this reference
-an external calibration file?*/
-void normalize_inputs(Scalar * dm_inputs)
-{
-    // do something
-}
-
 
 /*
 Argument parsing
