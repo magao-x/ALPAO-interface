@@ -17,9 +17,12 @@ Connects to the ALPAO DM (indicated by its serial number), initializes the
 shared memory image (if it doesn't already exist), and then commands the DM
 from the image when the associated semaphores post.
 
+Requires:
+export ACECFG=$HOME/ALPAO/Config
+where Config contains the ALPAO configuration files as well as the user-defined
+calibration file <serial>_userconfig.txt
+
 Still to be implemented or determined:
--Bias and displacement (though placeholder functions exist)
--Mapping from normalized ASDK inputs (-1 -> +1) to physical displacement
 -Multiplexed virtual DM
 */
 
@@ -278,7 +281,7 @@ int controlLoop(char * serial, int nobias, int nonorm)
     {
         return -1;
     }
-    
+
     //initialize DM
     asdkDM * dm = NULL;
     dm = asdkInit(serial);
