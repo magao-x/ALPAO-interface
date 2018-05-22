@@ -139,7 +139,7 @@ int controlLoop(char * serial, int nobias, int nonorm)
     }
 
     // set DM to all-0 state to begin
-    printf("ALPAO %s: initializing all actuators to 0 displacement.\n", serial);
+    printf("ALPAO %s: initializing all actuators to 0.\n", serial);
     ImageStreamIO_semwait(&SMimage[0], 0);
     ret = sendCommand(dm, SMimage, nbAct);
     if (ret == -1)
@@ -181,6 +181,26 @@ int controlLoop(char * serial, int nobias, int nonorm)
     dm = NULL;
 
     return 0;
+}
+
+/* Convert any DM inputs with an absolute fractional stroke
+> 1 to 1 to avoid exceeding safe DM operation. */
+void clip_to_limits(Scalar * dminputs, int nbAct)
+{
+    int idx;
+    // check each actuator and clip if needed
+    for ( idx = 0 ; idx < nbAct ; idx++)
+    {
+        if (dminputs[idx] > 1)
+        {
+            printf("Actuator %d saturated!\n", idx + 1);
+            dminputs[idx] = 1;
+        } else if (dminputs[idx] < -1)
+        {
+            printf("Actuator %d saturated!\n", idx + 1);
+            dminputs[idx] = - 1;
+        }
+    }
 }
 
 /* ASDK expects inputs between -1 and +1, but we'd like to provide
@@ -258,6 +278,11 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm)
     stroke (-1 to +1) that the ALPAO SDK expects */
     microns_to_fractional_stroke(dminputs, nbAct);
 
+    /* clip to fractional values between -1 and 1.
+    The ALPAO ASDK doesn't seem to check for this, which
+    is scary and a little odd. */
+    clip_to_limits(dminputs, nbAct);
+
     // volume normalization
     if (nonorm != 1)
     {
@@ -268,11 +293,6 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm)
     if (nobias != 1)
     {
         bias_inputs(dminputs, nbAct);
-    }
-
-    for ( idx = 0 ; idx < nbAct ; idx++ )
-    {
-        printf("%lf\n", dminputs[idx]);
     }
 
     /* Send the command to the DM */
