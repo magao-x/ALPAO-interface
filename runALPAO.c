@@ -243,17 +243,17 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm,
     /* Second, convert from displacement (in microns) to fractional
     stroke (-1 to +1) that the ALPAO SDK expects */
     microns_to_fractional_stroke(dminputs, nbAct, max_stroke);
-
-    /* Third, clip to fractional values between -1 and 1.
-    The ALPAO ASDK doesn't seem to check for this, which
-    is scary and a little odd. */
-    clip_to_limits(dminputs, nbAct);
-
-    // Fourth, remove DC bias in inputs
+    
+    // Third, remove DC bias in inputs
     if (nobias != 1)
     {
         bias_inputs(dminputs, nbAct);
     }
+
+    /* Fourth, clip to fractional values between -1 and 1.
+    The ALPAO ASDK doesn't seem to check for this, which
+    is scary and a little odd. */
+    clip_to_limits(dminputs, nbAct);
 
     /* Finally, send the command to the DM */
     ret = asdkSend(dm, dminputs);
