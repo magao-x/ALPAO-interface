@@ -164,9 +164,8 @@ int controlLoop(char * serial, int nobias, int nonorm)
         // Send Command to DM
         if (!stop) // Skip DM on interrupt signal
         {
-
             printf("ALPAO %s: sending command with nobias=%d and nonorm=%d.\n", serial, nobias, nonorm);
-            ret = sendCommand(dm, SMimage, nbAct);
+            ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm);
             if (ret == -1)
             {
                 return -1;
@@ -184,8 +183,29 @@ int controlLoop(char * serial, int nobias, int nonorm)
     return 0;
 }
 
+/* Remove DC bias in inputs to maximize actuator range */
+void bias_inputs(Scalar * dminputs, int nbAct)
+{
+    int idx;
+    Scalar mean;
+
+    // calculate mean value
+    mean = 0;
+    for ( idx = 0 ; idx < nbAct ; idx++)
+    {
+        mean += dminputs[idx];
+    }
+    mean /= nbAct;
+
+    // remove mean from each actuator input
+    for ( idx = 0 ; idx < nbAct ; idx++)
+    {
+        dminputs[idx] -= mean;
+    }
+}
+
 /* Send command to mirror from shared memory */
-int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct)
+int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm)
 {
     COMPL_STAT ret;
     int idx;
@@ -198,6 +218,17 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct)
         dminputs[idx] = SMimage[0].array.D[idx];
     }
 
+    if (nobias != 1)
+    {
+        bias_inputs(dminputs, nbAct);
+    }
+    
+
+    for ( idx = 0 ; idx < nbAct ; idx++ )
+    {
+        printf("%lf\n", dminputs[idx]);
+    }
+
     /* Send the command to the DM */
     ret = asdkSend(dm, dminputs);
 
@@ -205,12 +236,6 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct)
     free( dminputs );
 
     return ret;
-}
-
-/* Placeholder for DC bias */
-void bias_inputs(Scalar * dm_inputs)
-{
-    // do something
 }
 
 /* Placeholder for normalization 
