@@ -1,7 +1,7 @@
 # ALPAO-interface
 Interface to ALPAO DM-97
 
-To compile with the ASDK and milk ImageStreamIO libraries:
+To compile with the ASDK and milk [ImageStreamIO](https://github.com/milk-org/ImageStreamIO) libraries:
 	
 	gcc runALPAO.c -o build/runALPAO -L$HOME/milk/lib -I$HOME/milk/src/ImageStreamIO -limagestreamio -lasdk
 
@@ -9,7 +9,7 @@ To enter the DM control loop with default settings:
 
 	./runALPAO <serialnumber>
 
-`ctrl+c` will exit the loop safely reset and release the DM. To run with bias and normalization conventions disabled (not yet implemented):
+`ctrl+c` will exit the loop and safely reset and release the DM. To run with bias and normalization conventions disabled (not yet implemented):
 
 	./runALPAO <serialnumber> --nobias --nonorm
 
@@ -21,3 +21,5 @@ Once the control loop is running, the DM can be commanded by writing a 97x1 imag
 
 	./loadfits <path-to-fits-file> <serial>
 	./setpix <value> <actuator-number> <serial>
+	
+Alternatively, [PyImageStreamIO](https://github.com/kvangorkom/pyImageStreamIO) provides a simple interface in Python.
