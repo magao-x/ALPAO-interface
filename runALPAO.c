@@ -141,7 +141,7 @@ int controlLoop(char * serial, int nobias, int nonorm)
     // set DM to all-0 state to begin
     printf("ALPAO %s: initializing all actuators to 0.\n", serial);
     ImageStreamIO_semwait(&SMimage[0], 0);
-    ret = sendCommand(dm, SMimage, nbAct);
+    ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm);
     if (ret == -1)
     {
         return -1;
