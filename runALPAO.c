@@ -183,17 +183,34 @@ int controlLoop(char * serial, int nobias, int nonorm)
     return 0;
 }
 
-/* Placeholder for normalization 
+/* ASDK expects inputs between -1 and +1, but we'd like to provide
+stroke values in physical units. This function converts from microns
+of stroke to fractional stroke. This requires DM calibration. */
+void microns_to_fractional_stroke(Scalar * dminputs, int nbAct)
+{
+    int idx;
+    Scalar max_stroke;
 
-This will require knowledge of the ALPAO
-influence functions. Should this reference
-an external calibration file?*/
+    // hard-coded for now
+    max_stroke = 3.17;
+
+    // normalize each actuator stroke
+    for ( idx = 0 ; idx < nbAct ; idx++)
+    {
+        dminputs[idx] /= max_stroke;
+    }
+}
+
+/* Normalize inputs such that volume displaced by the requested command roughly
+matches the equivalent volume that would be displaced by a cuboid of dimensions
+actuator-pitch x actuator-pitch x normalized-stroke. This is a constant factor 
+that's found by calculating the volume under the DM influence function. */
 void normalize_inputs(Scalar * dminputs, int nbAct)
 {
     int idx;
     Scalar volume_factor;
     // hard-coded for the moment
-    volume_factor = 0.143; 
+    volume_factor = 0.454; 
 
     // normalize each actuator stroke
     for ( idx = 0 ; idx < nbAct ; idx++)
@@ -237,11 +254,11 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm)
         dminputs[idx] = SMimage[0].array.D[idx];
     }
 
-    /*normalize inputs such that volume displaced by the requested command roughly
-    matches the equivalent volume that would be displaced by a cuboid of dimensions
-    actuator-pitch x actuator-pitch x normalized-stroke. This is a constant factor 
-    that's found by calculating the volume under the DM influence function. */
-    //
+    /* convert from displacement (in microns) to fractional
+    stroke (-1 to +1) that the ALPAO SDK expects */
+    microns_to_fractional_stroke(dminputs, nbAct);
+
+    // volume normalization
     if (nonorm != 1)
     {
         normalize_inputs(dminputs, nbAct);
