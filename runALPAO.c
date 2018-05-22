@@ -30,6 +30,7 @@ Still to be implemented or determined:
 #include <stddef.h>
 #include <signal.h>
 #include <argp.h>
+#include <string.h>
 
 /* milk */
 #include "ImageStruct.h"   // cacao data structure definition
@@ -96,6 +97,169 @@ void initializeSharedMemory(char * serial, UInt nbAct)
     SMimage[0].md[0].cnt1++;
 }
 
+
+/* Convert any DM inputs with an absolute fractional stroke
+> 1 to 1 to avoid exceeding safe DM operation. */
+void clip_to_limits(Scalar * dminputs, int nbAct)
+{
+    int idx;
+    // check each actuator and clip if needed
+    for ( idx = 0 ; idx < nbAct ; idx++)
+    {
+        if (dminputs[idx] > 1)
+        {
+            printf("Actuator %d saturated!\n", idx + 1);
+            dminputs[idx] = 1;
+        } else if (dminputs[idx] < -1)
+        {
+            printf("Actuator %d saturated!\n", idx + 1);
+            dminputs[idx] = - 1;
+        }
+    }
+}
+
+/* ASDK expects inputs between -1 and +1, but we'd like to provide
+stroke values in physical units. This function converts from microns
+of stroke to fractional stroke. This requires DM calibration. */
+void microns_to_fractional_stroke(Scalar * dminputs, int nbAct, Scalar max_stroke)
+{
+    int idx;
+    // normalize each actuator stroke
+    for ( idx = 0 ; idx < nbAct ; idx++)
+    {
+        dminputs[idx] /= max_stroke;
+    }
+}
+
+/* Normalize inputs such that volume displaced by the requested command roughly
+matches the equivalent volume that would be displaced by a cuboid of dimensions
+actuator-pitch x actuator-pitch x normalized-stroke. This is a constant factor 
+that's found by calculating the volume under the DM influence function. */
+void normalize_inputs(Scalar * dminputs, int nbAct, Scalar volume_factor)
+{
+    int idx;
+    // normalize each actuator stroke
+    for ( idx = 0 ; idx < nbAct ; idx++)
+    {
+        dminputs[idx] *= volume_factor;
+    }
+}
+
+/* Remove DC bias in inputs to maximize actuator range */
+void bias_inputs(Scalar * dminputs, int nbAct)
+{
+    int idx;
+    Scalar mean;
+
+    // calculate mean value
+    mean = 0;
+    for ( idx = 0 ; idx < nbAct ; idx++)
+    {
+        mean += dminputs[idx];
+    }
+    mean /= nbAct;
+
+    // remove mean from each actuator input
+    for ( idx = 0 ; idx < nbAct ; idx++)
+    {
+        dminputs[idx] -= mean;
+    }
+}
+
+/* Read in a configuration file with user-calibrated
+values to determine the conversion from physical to
+fractional stroke as well as the volume displaced by
+the influence function. */
+int parse_calibration_file(char * serial, Scalar *max_stroke, Scalar *volume_factor)
+{
+    char * ACECFG;
+    char configname[1000];
+    char configpath[1000];
+    FILE * fp;
+    char * line = NULL;
+    size_t len = 0;
+    ssize_t read;
+    char * token;
+    Scalar * configvals;
+
+    // find config file location from ACECFG env variable
+    ACECFG = getenv("ACECFG");
+    strcpy(configpath, ACECFG);
+    sprintf(configname, "/%s_userconfig.txt", serial);
+    strcat(configpath, configname);
+
+    // open file
+    fp = fopen(configpath, "r");
+    if (fp == NULL)
+    {
+        printf("Could not read configuration file at %s!\n", configpath);
+        return -1;
+    }
+
+    configvals = (Scalar *) malloc(sizeof(Scalar));
+    int idx = 0;
+    while ((read = getline(&line, &len, fp)) != -1)
+    {
+        // grab first value from each line
+        token = strsep(&line, " ");
+        configvals[idx] = strtod(token, NULL);
+        idx++;
+    }
+
+    fclose(fp);
+
+    // assign stroke and volume factors
+    *max_stroke = configvals[0];
+    *volume_factor = configvals[1];
+
+    printf("ALPAO %s: Using stroke and volume calibration from %s\n", serial, configpath);
+    return 0;
+}
+
+/* Send command to mirror from shared memory */
+int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm, Scalar max_stroke, Scalar volume_factor)
+{
+    COMPL_STAT ret;
+    int idx;
+    Scalar * dminputs;
+
+    // Cast to array type ALPAO expects
+    dminputs = (Scalar*) calloc( nbAct, sizeof( Scalar ) );
+    for ( idx = 0 ; idx < nbAct ; idx++ )
+    {
+        dminputs[idx] = SMimage[0].array.D[idx];
+    }
+
+    // First, convert raw displacements to volume-normalized displacements (microns)
+    if (nonorm != 1)
+    {
+        normalize_inputs(dminputs, nbAct, volume_factor);
+    }
+
+    /* Second, convert from displacement (in microns) to fractional
+    stroke (-1 to +1) that the ALPAO SDK expects */
+    microns_to_fractional_stroke(dminputs, nbAct, max_stroke);
+
+    /* Third, clip to fractional values between -1 and 1.
+    The ALPAO ASDK doesn't seem to check for this, which
+    is scary and a little odd. */
+    clip_to_limits(dminputs, nbAct);
+
+    // Fourth, remove DC bias in inputs
+    if (nobias != 1)
+    {
+        bias_inputs(dminputs, nbAct);
+    }
+
+    /* Finally, send the command to the DM */
+    ret = asdkSend(dm, dminputs);
+
+    /* Release memory */
+    free( dminputs );
+
+    return ret;
+}
+
 // intialize DM and shared memory and enter DM command loop
 int controlLoop(char * serial, int nobias, int nonorm)
 {
@@ -103,8 +267,18 @@ int controlLoop(char * serial, int nobias, int nonorm)
     UInt nbAct;
     COMPL_STAT ret;
     Scalar     tmp;
-    IMAGE* SMimage;
+    IMAGE * SMimage;
+    Scalar max_stroke;
+    Scalar volume_factor;
 
+    /* get max stroke and volume normalization factor from
+    the user-defined config file */
+    ret = parse_calibration_file(serial, &max_stroke, &volume_factor);
+    if (ret == -1)
+    {
+        return -1;
+    }
+    
     //initialize DM
     asdkDM * dm = NULL;
     dm = asdkInit(serial);
@@ -141,7 +315,7 @@ int controlLoop(char * serial, int nobias, int nonorm)
     // set DM to all-0 state to begin
     printf("ALPAO %s: initializing all actuators to 0.\n", serial);
     ImageStreamIO_semwait(&SMimage[0], 0);
-    ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm);
+    ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, max_stroke, volume_factor);
     if (ret == -1)
     {
         return -1;
@@ -165,7 +339,7 @@ int controlLoop(char * serial, int nobias, int nonorm)
         if (!stop) // Skip DM on interrupt signal
         {
             printf("ALPAO %s: sending command with nobias=%d and nonorm=%d.\n", serial, nobias, nonorm);
-            ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm);
+            ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, max_stroke, volume_factor);
             if (ret == -1)
             {
                 return -1;
@@ -179,127 +353,6 @@ int controlLoop(char * serial, int nobias, int nonorm)
     asdkReset(dm);
     ret = asdkRelease(dm);
     dm = NULL;
-
-    return 0;
-}
-
-/* Convert any DM inputs with an absolute fractional stroke
-> 1 to 1 to avoid exceeding safe DM operation. */
-void clip_to_limits(Scalar * dminputs, int nbAct)
-{
-    int idx;
-    // check each actuator and clip if needed
-    for ( idx = 0 ; idx < nbAct ; idx++)
-    {
-        if (dminputs[idx] > 1)
-        {
-            printf("Actuator %d saturated!\n", idx + 1);
-            dminputs[idx] = 1;
-        } else if (dminputs[idx] < -1)
-        {
-            printf("Actuator %d saturated!\n", idx + 1);
-            dminputs[idx] = - 1;
-        }
-    }
-}
-
-/* ASDK expects inputs between -1 and +1, but we'd like to provide
-stroke values in physical units. This function converts from microns
-of stroke to fractional stroke. This requires DM calibration. */
-void microns_to_fractional_stroke(Scalar * dminputs, int nbAct)
-{
-    int idx;
-    Scalar max_stroke;
-
-    // hard-coded for now
-    max_stroke = 3.17;
-
-    // normalize each actuator stroke
-    for ( idx = 0 ; idx < nbAct ; idx++)
-    {
-        dminputs[idx] /= max_stroke;
-    }
-}
-
-/* Normalize inputs such that volume displaced by the requested command roughly
-matches the equivalent volume that would be displaced by a cuboid of dimensions
-actuator-pitch x actuator-pitch x normalized-stroke. This is a constant factor 
-that's found by calculating the volume under the DM influence function. */
-void normalize_inputs(Scalar * dminputs, int nbAct)
-{
-    int idx;
-    Scalar volume_factor;
-    // hard-coded for the moment
-    volume_factor = 0.454; 
-
-    // normalize each actuator stroke
-    for ( idx = 0 ; idx < nbAct ; idx++)
-    {
-        dminputs[idx] *= volume_factor;
-    }
-}
-
-/* Remove DC bias in inputs to maximize actuator range */
-void bias_inputs(Scalar * dminputs, int nbAct)
-{
-    int idx;
-    Scalar mean;
-
-    // calculate mean value
-    mean = 0;
-    for ( idx = 0 ; idx < nbAct ; idx++)
-    {
-        mean += dminputs[idx];
-    }
-    mean /= nbAct;
-
-    // remove mean from each actuator input
-    for ( idx = 0 ; idx < nbAct ; idx++)
-    {
-        dminputs[idx] -= mean;
-    }
-}
-
-/* Send command to mirror from shared memory */
-int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm)
-{
-    COMPL_STAT ret;
-    int idx;
-    Scalar *   dminputs;
-
-    // Cast to array type ALPAO expects
-    dminputs = (Scalar*) calloc( nbAct, sizeof( Scalar ) );
-    for ( idx = 0 ; idx < nbAct ; idx++ )
-    {
-        dminputs[idx] = SMimage[0].array.D[idx];
-    }
-
-    /* convert from displacement (in microns) to fractional
-    stroke (-1 to +1) that the ALPAO SDK expects */
-    microns_to_fractional_stroke(dminputs, nbAct);
-
-    /* clip to fractional values between -1 and 1.
-    The ALPAO ASDK doesn't seem to check for this, which
-    is scary and a little odd. */
-    clip_to_limits(dminputs, nbAct);
-
-    // volume normalization
-    if (nonorm != 1)
-    {
-        normalize_inputs(dminputs, nbAct);
-    }
-
-    // remove DC bias in inputs
-    if (nobias != 1)
-    {
-        bias_inputs(dminputs, nbAct);
-    }
-
-    /* Send the command to the DM */
-    ret = asdkSend(dm, dminputs);
-
-    /* Release memory */
-    free( dminputs );
 
     return ret;
 }
