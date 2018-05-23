@@ -18,15 +18,15 @@ To enter the DM control loop with default settings:
 
 	./runALPAO <serialnumber>
 
-`ctrl+c` will exit the loop and safely reset and release the DM. To run with bias and normalization conventions disabled:
+`ctrl+c` will exit the loop and safely reset and release the DM. To run with bias and normalization conventions disabled and inputs in fractional stroke:
 
-	./runALPAO <serialnumber> --nobias --nonorm
+	./runALPAO <serialnumber> --nobias --nonorm --fractional
 
 For help:
 
 	./runALPAO --help
 
-Once the control loop is running, the DM can be commanded by writing a 97x1 image to shared memory using your tool of choice. A few examples using the milk package are provided:
+Once the control loop is running, the DM can be commanded by writing a 97x1 image to shared memory using your tool of choice. By default, double-precision inputs are expected in microns of stroke. A few examples using the milk package are provided:
 
 	./loadfits <path-to-fits-file> <serial>
 	./setpix <value> <actuator-number> <serial>

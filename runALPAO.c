@@ -221,7 +221,7 @@ int parse_calibration_file(char * serial, Scalar *max_stroke, Scalar *volume_fac
 }
 
 /* Send command to mirror from shared memory */
-int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm, Scalar max_stroke, Scalar volume_factor)
+int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm, int fractional, Scalar max_stroke, Scalar volume_factor)
 {
     COMPL_STAT ret;
     int idx;
@@ -242,8 +242,10 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm,
 
     /* Second, convert from displacement (in microns) to fractional
     stroke (-1 to +1) that the ALPAO SDK expects */
-    microns_to_fractional_stroke(dminputs, nbAct, max_stroke);
-    
+    if (fractional != 1)
+    {
+        microns_to_fractional_stroke(dminputs, nbAct, max_stroke);
+    }
     // Third, remove DC bias in inputs
     if (nobias != 1)
     {
@@ -251,7 +253,7 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm,
     }
 
     /* Fourth, clip to fractional values between -1 and 1.
-    The ALPAO ASDK doesn't seem to check for this, which
+    The ALPAO SDK doesn't seem to check for this, which
     is scary and a little odd. */
     clip_to_limits(dminputs, nbAct);
 
@@ -265,7 +267,7 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm,
 }
 
 // intialize DM and shared memory and enter DM command loop
-int controlLoop(char * serial, int nobias, int nonorm)
+int controlLoop(char * serial, int nobias, int nonorm, int fractional)
 {
     int n, idx;
     UInt nbAct;
@@ -319,7 +321,7 @@ int controlLoop(char * serial, int nobias, int nonorm)
     // set DM to all-0 state to begin
     printf("ALPAO %s: initializing all actuators to 0.\n", serial);
     ImageStreamIO_semwait(&SMimage[0], 0);
-    ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, max_stroke, volume_factor);
+    ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, fractional, max_stroke, volume_factor);
     if (ret == -1)
     {
         return -1;
@@ -342,8 +344,8 @@ int controlLoop(char * serial, int nobias, int nonorm)
         // Send Command to DM
         if (!stop) // Skip DM on interrupt signal
         {
-            printf("ALPAO %s: sending command with nobias=%d and nonorm=%d.\n", serial, nobias, nonorm);
-            ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, max_stroke, volume_factor);
+            printf("ALPAO %s: sending command with nobias=%d, nonorm=%d, and fractional=%d.\n", serial, nobias, nonorm, fractional);
+            ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, fractional, max_stroke, volume_factor);
             if (ret == -1)
             {
                 return -1;
@@ -374,8 +376,9 @@ static char args_doc[] = "serial";
 
 /* The options we understand. */
 static struct argp_option options[] = {
-  {"nobias",  'b', 0,      0,  "Disable automatically biasing the DM (enabled by default)" },
-  {"nonorm",    'n', 0,      0,  "Disable displacement normalization (enabled by default)" },
+  {"nobias",     'b', 0, 0,  "Disable automatically biasing the DM (enabled by default)" },
+  {"nonorm",     'n', 0, 0,  "Disable displacement normalization (enabled by default)" },
+  {"fractional", 'f', 0, 0,  "Give inputs in fractional stroke (-1 to +1) rather than microns" },
   { 0 }
 };
 
@@ -383,7 +386,7 @@ static struct argp_option options[] = {
 struct arguments
 {
   char *args[1];                /* serial */
-  int nobias, nonorm;
+  int nobias, nonorm, fractional;
 };
 
 /* Parse a single option. */
@@ -401,6 +404,8 @@ static error_t parse_opt (int key, char *arg, struct argp_state *state)
     case 'n':
       arguments->nonorm = 1;
       break;
+    case 'f':
+      arguments->fractional = 1;
 
     case ARGP_KEY_ARG:
       if (state->arg_num >= 1)
@@ -434,13 +439,14 @@ int main( int argc, char ** argv )
     /* Default values. */
     arguments.nobias = 0;
     arguments.nonorm = 0;
+    arguments.fractional = 0;
 
     /* Parse our arguments; every option seen by parse_opt will
      be reflected in arguments. */
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
 
     // enter the control loop
-    int ret = controlLoop(arguments.args[0], arguments.nobias, arguments.nonorm);
+    int ret = controlLoop(arguments.args[0], arguments.nobias, arguments.nonorm, arguments.fractional);
     asdkPrintLastError();
 
     return ret;
