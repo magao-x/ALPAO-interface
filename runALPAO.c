@@ -1,6 +1,6 @@
 /*
 To compile:
->>>gcc runALPAO.c -o build/runALPAO -L$HOME/milk/lib -I$HOME/milk/src/ImageStreamIO -limagestreamio -lasdk
+>>>gcc -o build/runALPAO runALPAO.c -lImageStreamIO -lasdk -lpthread
 (You must already have the ALPAO SDK and milk installed.)
 
 Usage:
