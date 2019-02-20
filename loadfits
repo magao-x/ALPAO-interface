@@ -1,5 +1,5 @@
 #Usage: ./loadfits /path/to/fitsfile.fits serial
-milk << EOF
+cacao << EOF
 loadfits "$1" im
 readshmim $2
 cp im $2
