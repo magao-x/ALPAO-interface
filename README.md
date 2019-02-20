@@ -2,11 +2,15 @@
 
 To compile with the ASDK and milk [ImageStreamIO](https://github.com/milk-org/ImageStreamIO) libraries:
 	
-	gcc runALPAO.c -o build/runALPAO -L$HOME/milk/lib -I$HOME/milk/src/ImageStreamIO -limagestreamio -lasdk
+	gcc -o build/runALPAO runALPAO.c -lImageStreamIO -lasdk -lpthread
 	
 Before running, set the path to the ALPAO configuration files and copy \<serial\>_userconfig.txt to the same directory:
 	
 	export ACECFG=$HOME/ALPAO/Config
+	
+To ensure drivers are loaded (if exao0 has been recently rebooted, for example), run with root privileges:
+
+	/usr/src/interface_alpao/diobminsmod && /usr/src/interface_alpao/util/dpg0101 -s 2x72c
 
 ------------------------
 

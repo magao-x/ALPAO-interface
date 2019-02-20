@@ -10,6 +10,15 @@ Prints out the value of each actuator input from the shared
 memory image corresponding to an ALPAO DM, which should
 directly correspond to the real actuator stroke state if
 the DM is in use.
+
+In retrospect, this is probably of limited value. It queries
+the shared memory image, which is before the processing
+(normalization, conversion from microns to fractional stroke, etc)
+of the input sent to the DM. The only fix would be to update the
+shared memory image (which I don't want to do) or else figure out
+how to query the ALPAO for this information. I'm not sure that's
+possible.
+
 */
 
 /* System Headers */
