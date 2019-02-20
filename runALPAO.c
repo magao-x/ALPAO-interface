@@ -1,6 +1,7 @@
 /*
 To compile:
->>>gcc -o build/runALPAO runALPAO.c -lImageStreamIO -lasdk -lpthread
+>>>gcc runALPAO.c -o build/runALPAO -lImageStreamIO -lasdk -lpthread -lrt
+
 (You must already have the ALPAO SDK and milk installed.)
 
 Usage:
@@ -73,7 +74,7 @@ void initializeSharedMemory(char * serial, UInt nbAct)
     
     // image will be float type
     // see file ImageStruct.h for list of supported types
-    atype = _DATATYPE_DOUBLE;
+    atype = _DATATYPE_FLOAT;
     // image will be in shared memory
     shared = 1;
     // allocate space for 10 keywords
@@ -90,7 +91,7 @@ void initializeSharedMemory(char * serial, UInt nbAct)
     int i;
     for (i = 0; i < nbAct; i++)
     {
-      SMimage[0].array.D[i] = 0.;
+      SMimage[0].array.F[i] = 0.;
     }
 
     // post all semaphores
@@ -228,10 +229,12 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm,
     Scalar * dminputs;
 
     // Cast to array type ALPAO expects
+    // Scalar = double
+    // Shared memory image = float
     dminputs = (Scalar*) calloc( nbAct, sizeof( Scalar ) );
     for ( idx = 0 ; idx < nbAct ; idx++ )
     {
-        dminputs[idx] = SMimage[0].array.D[idx];
+        dminputs[idx] = (Scalar)SMimage[0].array.F[idx];
     }
 
     // First, convert raw displacements to volume-normalized displacements (microns)
