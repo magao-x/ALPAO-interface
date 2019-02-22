@@ -177,9 +177,9 @@ fractional stroke as well as the volume displaced by
 the influence function. */
 int parse_calibration_file(char * serial, Scalar *max_stroke, Scalar *volume_factor)
 {
-    char * ACECFG;
-    char configname[1000];
-    char configpath[1000];
+    char * alpao_calib;
+    char calibname[1000];
+    char calibpath[1000];
     FILE * fp;
     char * line = NULL;
     size_t len = 0;
@@ -187,11 +187,11 @@ int parse_calibration_file(char * serial, Scalar *max_stroke, Scalar *volume_fac
     char * token;
     Scalar * configvals;
 
-    // find config file location from ACECFG env variable
-    ACECFG = getenv("ACECFG");
-    strcpy(configpath, ACECFG);
-    sprintf(configname, "/%s_userconfig.txt", serial);
-    strcat(configpath, configname);
+    // find calibration file location from alpao_calib env variable
+    alpao_calib = getenv("alpao_calib");
+    strcpy(calibpath, alpao_calib);
+    sprintf(calibname, "alpao_%s/%s_userconfig.txt", serial, serial);
+    strcat(calibpath, calibname);
 
     // open file
     fp = fopen(configpath, "r");
@@ -438,6 +438,7 @@ static struct argp argp = { options, parse_opt, args_doc, doc };
 int main( int argc, char ** argv )
 {
     struct arguments arguments;
+    char * serial
 
     /* Default values. */
     arguments.nobias = 0;
@@ -448,8 +449,14 @@ int main( int argc, char ** argv )
      be reflected in arguments. */
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
 
+    // force serial to be lower case
+    // will I need this? #include <ctype.h>
+    for(int i = 0; str[i]; i++){
+      serial[i] = tolower(serial[i]);
+    }
+
     // enter the control loop
-    int ret = controlLoop(arguments.args[0], arguments.nobias, arguments.nonorm, arguments.fractional);
+    int ret = controlLoop(serial, arguments.nobias, arguments.nonorm, arguments.fractional);
     asdkPrintLastError();
 
     return ret;
