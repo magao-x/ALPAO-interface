@@ -1,0 +1,2 @@
+3.17 #maxstroke in microns
+0.43 #volume conversion factor
