@@ -180,44 +180,50 @@ int parse_calibration_file(char * serial, Scalar *max_stroke, Scalar *volume_fac
     char * alpao_calib;
     char calibname[1000];
     char calibpath[1000];
+    char * serial_lc;
     FILE * fp;
     char * line = NULL;
     size_t len = 0;
     ssize_t read;
     char * token;
-    Scalar * configvals;
+    Scalar * calibvals;
+
+    // force serial to be lower case
+    for(int i = 0; serial[i]; i++){
+      serial_lc[i] = tolower(serial[i]);
+    }
 
     // find calibration file location from alpao_calib env variable
     alpao_calib = getenv("alpao_calib");
     strcpy(calibpath, alpao_calib);
-    sprintf(calibname, "alpao_%s/%s_userconfig.txt", serial, serial);
+    sprintf(calibname, "/alpao_%s/%s_userconfig.txt", serial_lc, serial_lc);
     strcat(calibpath, calibname);
 
     // open file
-    fp = fopen(configpath, "r");
+    fp = fopen(calibpath, "r");
     if (fp == NULL)
     {
-        printf("Could not read configuration file at %s!\n", configpath);
+        printf("Could not read configuration file at %s!\n", calibpath);
         return -1;
     }
 
-    configvals = (Scalar *) malloc(sizeof(Scalar));
+    calibvals = (Scalar *) malloc(sizeof(Scalar));
     int idx = 0;
     while ((read = getline(&line, &len, fp)) != -1)
     {
         // grab first value from each line
         token = strsep(&line, " ");
-        configvals[idx] = strtod(token, NULL);
+        calibvals[idx] = strtod(token, NULL);
         idx++;
     }
 
     fclose(fp);
 
     // assign stroke and volume factors
-    *max_stroke = configvals[0];
-    *volume_factor = configvals[1];
+    *max_stroke = calibvals[0];
+    *volume_factor = calibvals[1];
 
-    printf("ALPAO %s: Using stroke and volume calibration from %s\n", serial, configpath);
+    printf("ALPAO %s: Using stroke and volume calibration from %s\n", serial, calibpath);
     return 0;
 }
 
@@ -438,7 +444,7 @@ static struct argp argp = { options, parse_opt, args_doc, doc };
 int main( int argc, char ** argv )
 {
     struct arguments arguments;
-    char * serial
+    char * serial;
 
     /* Default values. */
     arguments.nobias = 0;
@@ -449,11 +455,7 @@ int main( int argc, char ** argv )
      be reflected in arguments. */
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
 
-    // force serial to be lower case
-    // will I need this? #include <ctype.h>
-    for(int i = 0; str[i]; i++){
-      serial[i] = tolower(serial[i]);
-    }
+    serial = arguments.args[0];
 
     // enter the control loop
     int ret = controlLoop(serial, arguments.nobias, arguments.nonorm, arguments.fractional);
