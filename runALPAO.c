@@ -56,7 +56,7 @@ void handle_signal(int signal)
 }
 
 // Initialize the shared memory image
-void initializeSharedMemory(char * serial, UInt nbAct)
+void initializeSharedMemory(const char * shm_name, UInt nbAct)
 {
     long naxis; // number of axis
     uint8_t atype;     // data type
@@ -80,7 +80,7 @@ void initializeSharedMemory(char * serial, UInt nbAct)
     // allocate space for 10 keywords
     NBkw = 10;
     // create an image in shared memory
-    ImageStreamIO_createIm(&SMimage[0], serial, naxis, imsize, atype, shared, NBkw);
+    ImageStreamIO_createIm(&SMimage[0], shm_name, naxis, imsize, atype, shared, NBkw);
 
     /* flush all semaphores to avoid commanding the DM from a 
     backlog in shared memory */
@@ -175,12 +175,12 @@ void bias_inputs(Scalar * dminputs, int nbAct)
 values to determine the conversion from physical to
 fractional stroke as well as the volume displaced by
 the influence function. */
-int parse_calibration_file(char * serial, Scalar *max_stroke, Scalar *volume_factor)
+int parse_calibration_file(const char * serial, Scalar *max_stroke, Scalar *volume_factor)
 {
     char * alpao_calib;
     char calibname[1000];
     char calibpath[1000];
-    char * serial_lc;
+    char serial_lc[1000];
     FILE * fp;
     char * line = NULL;
     size_t len = 0;
@@ -207,21 +207,20 @@ int parse_calibration_file(char * serial, Scalar *max_stroke, Scalar *volume_fac
         return -1;
     }
 
-    calibvals = (Scalar *) malloc(sizeof(Scalar));
+    calibvals = (Scalar*) malloc(2*sizeof(Scalar));
     int idx = 0;
     while ((read = getline(&line, &len, fp)) != -1)
     {
         // grab first value from each line
-        token = strsep(&line, " ");
-        calibvals[idx] = strtod(token, NULL);
+        calibvals[idx] = strtod(line, NULL);
         idx++;
     }
 
     fclose(fp);
 
     // assign stroke and volume factors
-    *max_stroke = calibvals[0];
-    *volume_factor = calibvals[1];
+    (*max_stroke) = calibvals[0];
+    (*volume_factor) = calibvals[1];
 
     printf("ALPAO %s: Using stroke and volume calibration from %s\n", serial, calibpath);
     return 0;
@@ -266,6 +265,10 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm,
     is scary and a little odd. */
     clip_to_limits(dminputs, nbAct);
 
+    for (idx = 0; idx < nbAct; idx++) {
+        printf("Act %d: %f\n", idx, dminputs[idx]);
+    } 
+
     /* Finally, send the command to the DM */
     ret = asdkSend(dm, dminputs);
 
@@ -276,7 +279,7 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm,
 }
 
 // intialize DM and shared memory and enter DM command loop
-int controlLoop(char * serial, int nobias, int nonorm, int fractional)
+int controlLoop(const char * serial, const char * shm_name, int nobias, int nonorm, int fractional)
 {
     int n, idx;
     UInt nbAct;
@@ -289,6 +292,7 @@ int controlLoop(char * serial, int nobias, int nonorm, int fractional)
     /* get max stroke and volume normalization factor from
     the user-defined config file */
     ret = parse_calibration_file(serial, &max_stroke, &volume_factor);
+
     if (ret == -1)
     {
         return -1;
@@ -302,6 +306,7 @@ int controlLoop(char * serial, int nobias, int nonorm, int fractional)
         return -1;
     }
 
+
     // Get number of actuators
     ret = asdkGet( dm, "NbOfActuator", &tmp );
     if (ret == -1)
@@ -311,11 +316,11 @@ int controlLoop(char * serial, int nobias, int nonorm, int fractional)
     nbAct = (UInt) tmp;
 
     // initialize shared memory image to 0s
-    initializeSharedMemory(serial, nbAct);
+    initializeSharedMemory(shm_name, nbAct);
 
     // connect to shared memory image (SMimage)
     SMimage = (IMAGE*) malloc(sizeof(IMAGE));
-    ImageStreamIO_read_sharedmem_image_toIMAGE(serial, &SMimage[0]);
+    ImageStreamIO_read_sharedmem_image_toIMAGE(shm_name, &SMimage[0]);
 
     // Validate SMimage dimensionality and size against DM
     if (SMimage[0].md[0].naxis != 2) {
@@ -330,6 +335,7 @@ int controlLoop(char * serial, int nobias, int nonorm, int fractional)
     // set DM to all-0 state to begin
     printf("ALPAO %s: initializing all actuators to 0.\n", serial);
     ImageStreamIO_semwait(&SMimage[0], 0);
+    //printf("%f\n%f\n", max_stroke, volume_factor);
     ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, fractional, max_stroke, volume_factor);
     if (ret == -1)
     {
@@ -378,10 +384,10 @@ Argument parsing
 
 /* Program documentation. */
 static char doc[] =
-  "runALPAO-- enter the ALPAO DM command loop and wait for milk shared memory images to be posted at <serial>";
+  "runALPAO-- enter the ALPAO DM <serial> command loop and wait for cacao shared memory images to be posted at <shm_name>";
 
 /* A description of the arguments we accept. */
-static char args_doc[] = "serial";
+static char args_doc[] = "serial shm_name";
 
 /* The options we understand. */
 static struct argp_option options[] = {
@@ -394,7 +400,7 @@ static struct argp_option options[] = {
 /* Used by main to communicate with parse_opt. */
 struct arguments
 {
-  char *args[1];                /* serial */
+  const char *args[2];    /* serial and shared memory name */
   int nobias, nonorm, fractional;
 };
 
@@ -417,7 +423,7 @@ static error_t parse_opt (int key, char *arg, struct argp_state *state)
       arguments->fractional = 1;
 
     case ARGP_KEY_ARG:
-      if (state->arg_num >= 1)
+      if (state->arg_num >= 2)
         /* Too many arguments. */
         argp_usage (state);
 
@@ -426,7 +432,7 @@ static error_t parse_opt (int key, char *arg, struct argp_state *state)
       break;
 
     case ARGP_KEY_END:
-      if (state->arg_num < 1)
+      if (state->arg_num < 2)
         /* Not enough arguments. */
         argp_usage (state);
       break;
@@ -444,7 +450,8 @@ static struct argp argp = { options, parse_opt, args_doc, doc };
 int main( int argc, char ** argv )
 {
     struct arguments arguments;
-    char * serial;
+    const char * serial;
+    const char * shm_name;
 
     /* Default values. */
     arguments.nobias = 0;
@@ -456,9 +463,10 @@ int main( int argc, char ** argv )
     argp_parse (&argp, argc, argv, 0, 0, &arguments);
 
     serial = arguments.args[0];
+    shm_name = arguments.args[1];
 
     // enter the control loop
-    int ret = controlLoop(serial, arguments.nobias, arguments.nonorm, arguments.fractional);
+    int ret = controlLoop(serial, shm_name, arguments.nobias, arguments.nonorm, arguments.fractional);
     asdkPrintLastError();
 
     return ret;
