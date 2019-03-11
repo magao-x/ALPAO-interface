@@ -1,8 +1,8 @@
 /*
 To compile:
->>>gcc runALPAO.c -o build/runALPAO -lImageStreamIO -lasdk -lpthread -lrt
+>>>gcc runALPAO.c -o build/runALPAO -lImageStreamIO -lasdk -lpthread -lrt -lcfitsio
 
-(You must already have the ALPAO SDK and milk installed.)
+(You must already have the ALPAO SDK and cacao/milk installed.)
 
 Usage:
 To run with defaults
@@ -36,12 +36,15 @@ Still to be implemented or determined:
 #include <argp.h>
 #include <string.h>
 
-/* milk */
+/* cacao */
 #include "ImageStruct.h"   // cacao data structure definition
 #include "ImageStreamIO.h" // function ImageStreamIO_read_sharedmem_image_toIMAGE()
 
 /* Alpao SDK C Header */
 #include "asdkWrapper.h"
+
+/* FITS */
+#include "fitsio.h"
 
 // interrupt signal handling for safe DM shutdown
 volatile sig_atomic_t stop;
@@ -56,7 +59,7 @@ void handle_signal(int signal)
 }
 
 // Initialize the shared memory image
-void initializeSharedMemory(const char * shm_name, UInt nbAct)
+void initializeSharedMemory(const char * shm_name, int ax1, int ax2)
 {
     long naxis; // number of axis
     uint8_t atype;     // data type
@@ -69,8 +72,8 @@ void initializeSharedMemory(const char * shm_name, UInt nbAct)
 
     naxis = 2;
     imsize = (uint32_t *) malloc(sizeof(uint32_t)*naxis);
-    imsize[0] = nbAct;
-    imsize[1] = 1;
+    imsize[0] = ax1;
+    imsize[1] = ax2;
     
     // image will be float type
     // see file ImageStruct.h for list of supported types
@@ -89,7 +92,7 @@ void initializeSharedMemory(const char * shm_name, UInt nbAct)
     // write 0s to the image
     SMimage[0].md[0].write = 1; // set this flag to 1 when writing data
     int i;
-    for (i = 0; i < nbAct; i++)
+    for (i = 0; i < 11*11; i++)
     {
       SMimage[0].array.F[i] = 0.;
     }
@@ -226,8 +229,90 @@ int parse_calibration_file(const char * serial, Scalar *max_stroke, Scalar *volu
     return 0;
 }
 
+int get_actuator_mapping(const char * serial, int nbAct, int * actuator_mapping)
+{
+    /* This function closely follows the CFITSIO imstat
+    example */
+
+    fitsfile *fptr;  /* FITS file pointer */
+    int status = 0;  /* CFITSIO status value MUST be initialized to zero! */
+    int hdutype, naxis, ii;
+    long naxes[2], totpix, fpixel[2];
+    int *pix;
+    int ij = 0; /* actuator mapping index */
+
+    char * alpao_calib;
+    char calibname[1000];
+    char calibpath[1000];
+    char serial_lc[1000];
+
+    // get file path to actuator map
+
+    // force serial to be lower case
+    for(int i = 0; serial[i]; i++){
+      serial_lc[i] = tolower(serial[i]);
+    }
+
+    alpao_calib = getenv("alpao_calib");
+    strcpy(calibpath, alpao_calib);
+    sprintf(calibname, "/alpao_%s/%s_actuator_mapping.fits", serial_lc, serial_lc);
+    strcat(calibpath, calibname);
+
+    if ( !fits_open_image(&fptr, calibpath, READONLY, &status) )
+    {
+      if (fits_get_hdu_type(fptr, &hdutype, &status) || hdutype != IMAGE_HDU) { 
+        printf("Error: this program only works on images, not tables\n");
+        return(1);
+      }
+
+      fits_get_img_dim(fptr, &naxis, &status);
+      fits_get_img_size(fptr, 2, naxes, &status);
+
+      if (status || naxis != 2) { 
+        printf("Error: NAXIS = %d.  Only 2-D images are supported.\n", naxis);
+        return(1);
+      }
+
+      pix = (int *) malloc(naxes[0] * sizeof(int)); /* memory for 1 row */
+
+      if (pix == NULL) {
+        printf("Memory allocation error\n");
+        return(1);
+      }
+
+      totpix = naxes[0] * naxes[1];
+      fpixel[0] = 1;  /* read starting with first pixel in each row */
+
+      /* process image one row at a time; increment row # in each loop */
+      for (fpixel[1] = 1; fpixel[1] <= naxes[1]; fpixel[1]++)
+      {  
+         /* give starting pixel coordinate and number of pixels to read */
+         if (fits_read_pix(fptr, TINT, fpixel, naxes[0],0, pix,0, &status))
+            break;   /* jump out of loop on error */
+
+         // get indices of active actuators in order
+         for (ii = 0; ii < naxes[0]; ii++) {
+           if (pix[ii] > 0) {
+                actuator_mapping[ij] = (fpixel[1]-1) * naxes[0] + ii;
+                ij++;
+           }
+         }
+      }
+      fits_close_file(fptr, &status);
+    }
+
+    if (status)  {
+        fits_report_error(stderr, status); /* print any error message */
+    }
+
+    free(pix);
+
+    printf("ALPAO %s: Using actuator mapping from %s\n", serial, calibpath);
+    return 0;
+}
+
 /* Send command to mirror from shared memory */
-int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm, int fractional, Scalar max_stroke, Scalar volume_factor)
+int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm, int fractional, Scalar max_stroke, Scalar volume_factor, int * actuator_mapping)
 {
     COMPL_STAT ret;
     int idx;
@@ -239,7 +324,8 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm,
     dminputs = (Scalar*) calloc( nbAct, sizeof( Scalar ) );
     for ( idx = 0 ; idx < nbAct ; idx++ )
     {
-        dminputs[idx] = (Scalar)SMimage[0].array.F[idx];
+        // use actuator mapping to pull correct element of shared memory image
+        dminputs[idx] = (Scalar)SMimage[0].array.F[actuator_mapping[idx]];
     }
 
     // First, convert raw displacements to volume-normalized displacements (microns)
@@ -265,9 +351,9 @@ int sendCommand(asdkDM * dm, IMAGE * SMimage, int nbAct, int nobias, int nonorm,
     is scary and a little odd. */
     clip_to_limits(dminputs, nbAct);
 
-    for (idx = 0; idx < nbAct; idx++) {
-        printf("Act %d: %f\n", idx, dminputs[idx]);
-    } 
+    //for (idx = 0; idx < nbAct; idx++) {
+    //    printf("Act %d: %f\n", idx, dminputs[idx]);
+    //} 
 
     /* Finally, send the command to the DM */
     ret = asdkSend(dm, dminputs);
@@ -288,6 +374,8 @@ int controlLoop(const char * serial, const char * shm_name, int nobias, int nono
     IMAGE * SMimage;
     Scalar max_stroke;
     Scalar volume_factor;
+    int *actuator_mapping;
+    int shm_dim = 11;
 
     /* get max stroke and volume normalization factor from
     the user-defined config file */
@@ -306,7 +394,6 @@ int controlLoop(const char * serial, const char * shm_name, int nobias, int nono
         return -1;
     }
 
-
     // Get number of actuators
     ret = asdkGet( dm, "NbOfActuator", &tmp );
     if (ret == -1)
@@ -315,8 +402,13 @@ int controlLoop(const char * serial, const char * shm_name, int nobias, int nono
     }
     nbAct = (UInt) tmp;
 
+    /* get actuator mapping from 2D cacao image to 1D vector for
+    ALPAO input */
+    actuator_mapping = (int *) malloc(nbAct * sizeof(int)); /* memory for actuator mapping */
+    get_actuator_mapping(serial, nbAct, actuator_mapping);
+
     // initialize shared memory image to 0s
-    initializeSharedMemory(shm_name, nbAct);
+    initializeSharedMemory(shm_name, shm_dim, shm_dim);
 
     // connect to shared memory image (SMimage)
     SMimage = (IMAGE*) malloc(sizeof(IMAGE));
@@ -327,8 +419,12 @@ int controlLoop(const char * serial, const char * shm_name, int nobias, int nono
         printf("SM image naxis = %d\n", SMimage[0].md[0].naxis);
         return -1;
     }
-    if (SMimage[0].md[0].size[0] != nbAct) {
+    if (SMimage[0].md[0].size[0] != shm_dim) {
         printf("SM image size (axis 1) = %d", SMimage[0].md[0].size[0]);
+        return -1;
+    }
+    if (SMimage[0].md[0].size[1] != shm_dim) {
+        printf("SM image size (axis 2) = %d", SMimage[0].md[0].size[1]);
         return -1;
     }
 
@@ -336,7 +432,7 @@ int controlLoop(const char * serial, const char * shm_name, int nobias, int nono
     printf("ALPAO %s: initializing all actuators to 0.\n", serial);
     ImageStreamIO_semwait(&SMimage[0], 0);
     //printf("%f\n%f\n", max_stroke, volume_factor);
-    ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, fractional, max_stroke, volume_factor);
+    ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, fractional, max_stroke, volume_factor, actuator_mapping);
     if (ret == -1)
     {
         return -1;
@@ -360,7 +456,7 @@ int controlLoop(const char * serial, const char * shm_name, int nobias, int nono
         if (!stop) // Skip DM on interrupt signal
         {
             printf("ALPAO %s: sending command with nobias=%d, nonorm=%d, and fractional=%d.\n", serial, nobias, nonorm, fractional);
-            ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, fractional, max_stroke, volume_factor);
+            ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, fractional, max_stroke, volume_factor, actuator_mapping);
             if (ret == -1)
             {
                 return -1;
