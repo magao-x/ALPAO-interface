@@ -284,7 +284,8 @@ int get_actuator_mapping(const char * serial, int nbAct, int * actuator_mapping)
       fpixel[0] = 1;  /* read starting with first pixel in each row */
 
       /* process image one row at a time; increment row # in each loop */
-      for (fpixel[1] = 1; fpixel[1] <= naxes[1]; fpixel[1]++)
+      //for (fpixel[1] = 1; fpixel[1] <= naxes[1]; fpixel[1]++)
+      for (fpixel[1] = naxes[1]; fpixel[1] >= 1; fpixel[1]--)
       {  
          /* give starting pixel coordinate and number of pixels to read */
          if (fits_read_pix(fptr, TINT, fpixel, naxes[0],0, pix,0, &status))
