@@ -449,14 +449,14 @@ int controlLoop(const char * serial, const char * shm_name, int nobias, int nono
     // control loop
     while (!stop)
     {
-        printf("ALPAO %s: waiting on commands.\n", serial);
+        //printf("ALPAO %s: waiting on commands.\n", serial);
         // Wait on semaphore update
         ImageStreamIO_semwait(&SMimage[0], 0);
         
         // Send Command to DM
         if (!stop) // Skip DM on interrupt signal
         {
-            printf("ALPAO %s: sending command with nobias=%d, nonorm=%d, and fractional=%d.\n", serial, nobias, nonorm, fractional);
+            //printf("ALPAO %s: sending command with nobias=%d, nonorm=%d, and fractional=%d.\n", serial, nobias, nonorm, fractional);
             ret = sendCommand(dm, SMimage, nbAct, nobias, nonorm, fractional, max_stroke, volume_factor, actuator_mapping);
             if (ret == -1)
             {
