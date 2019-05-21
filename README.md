@@ -1,8 +1,9 @@
 # ALPAO-interface
 
-To compile with the ASDK and milk [ImageStreamIO](https://github.com/milk-org/ImageStreamIO) libraries:
-	
-	gcc -o build/runALPAO runALPAO.c -lImageStreamIO -lasdk -lpthread
+To compile on exao2:
+
+	source /opt/rh/devtoolset-7/
+	gcc runALPAO.c -o build/runALPAO -lImageStreamIO -lasdk -lpthread -lrt -lcfitsio
 	
 Before running, set the path to the ALPAO configuration files and copy \<serial\>_userconfig.txt to the same directory:
 	
